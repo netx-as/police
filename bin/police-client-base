@@ -1,0 +1,226 @@
+#!/usr/bin/perl -w 
+
+use strict;
+use warnings;
+use lib '../lib';
+use Police::Scan::Dir;
+use Police::Log;
+use Police::Paths;
+use XML::Parser;
+
+my $VERSION		= "2011-05-19.001";
+my $PVERSION	= "0.3";		# protocol version 
+
+my @PATHS;
+my @ERROR;
+my %ACTIONS;
+my $CHECKSUM	= "md5";		# checksum type
+my $FH = undef;
+
+##########################################################
+# Handlers                                              #
+##########################################################
+
+# Handle to print scan result on the stdout
+sub PrintFileXML($$) {
+	my ($class, $file, $ref) = @_;
+
+	my $atts = "";
+	while (my ($key, $val) = each %{$ref}) {
+		$atts .= sprintf("%s=\"%s\" ", $key, $val) if (defined($val));
+	}
+	# encode file name
+	$file =~ s/([^-_.~A-Za-z0-9\/ \+\:\@])/sprintf("%%%02X", ord($1))/seg;
+#	$file =~ s/([^-_.~A-Za-z0-9])/sprintf("%%%02X", ord($1))/seg;
+	printf "\t\t<file name=\"%s\" %s/>\n", $file, $atts;
+}
+
+# XML server parsing hooks
+sub client_handle_xml_begin {
+	my ($expat, $element, %attrs ) = @_;
+	my $path = join('/', (@{$expat->{'Context'}}, $element));
+
+	if ($path eq 'server/actions/scan') {
+		$ACTIONS{'scan'} = 1;
+		$CHECKSUM = $attrs{'checksum'}	if (defined $attrs{'checksum'} );
+	}
+
+	$ACTIONS{'backup'} = 1	if ($path eq 'server/actions/backup');
+
+	if ($path eq 'server/command') {
+		my $cmd = $attrs{'cmd'};
+		my $arg = $attrs{'arg'};
+		my $error;
+
+		printf "\t<messages><message>Processing %s %s</message></messages>\n", $cmd, $arg;
+
+		if ( $cmd eq 'get' ) {
+			close $FH if ( defined $FH );
+			#open $FH, "| base64 -d > $arg.police";
+			open $FH, "| base64 -d -i > $arg";
+		} elsif ( $cmd eq 'chmod' || $cmd eq 'chown' ) {
+			my @errs = `$cmd $arg 2>&1`;
+			$error = join("\n", @errs);
+		} elsif ( $cmd eq 'link') {
+			my @errs = `ln -s -f $arg 2>&1`;
+			$error = join("\n", @errs);
+		} elsif ( $cmd eq 'mkdir') {
+			my @errs = `mkdir $arg 2>&1`;
+			$error = join("\n", @errs);
+		} elsif ( $cmd eq 'exec') {
+			my @errs = `$arg`;
+			$error = join("\n", @errs);
+		} elsif ( $cmd eq 'remove') {
+			if ( -d $arg ) {
+				my $ret = rmdir($arg);
+				$error = sprintf("Dir %s can not be deleted (%s)", $arg, $!) if (!$ret);
+			} else {
+				my $ret = unlink($arg);
+				$error = sprintf("File %s can not be deleted (%s)", $arg, $!) if (!$ret);
+			}
+		} else {
+			$error = sprintf("Command %s is not supported by the client", $cmd);
+		}
+
+		if ( defined $error ) {
+			printf "\t<errors><error>%s</error></errors>\n", $error;
+		}
+	}
+
+	if ($path eq 'server/actions/services') {
+		$ACTIONS{'services'} = 1;
+	}
+
+	if ($path eq 'server/actions/rpms') {
+		$ACTIONS{'rpms'} = 1;
+	}
+}
+
+sub client_handle_xml_end {
+	my ($expat, $element, %attrs ) = @_;
+	my $path = join('/', (@{$expat->{'Context'}}, $element));
+
+	close $FH if ( defined $FH && $path eq 'server/command' ) ;
+}
+
+sub client_handle_xml_char {
+	my ($expat, $element, %attrs) = @_;
+	my $path = join('/', @{$expat->{'Context'}});
+
+	push(@PATHS, $element)	if ($path eq 'server/paths/path');
+	print $FH $element 	if ( defined $FH && $path eq 'server/command' ) ;
+}
+
+
+##########################################################
+# Main body                                              #
+##########################################################
+
+my $Log =  Police::Log->new(ShowProgress => 0);
+
+# create the client output 
+printf "<client version=\"%s\">\n", $VERSION;
+printf "\t<capabilites>\n";
+printf "\t\t<scan/>\n";
+printf "\t\t<backup/>\n";
+printf "\t\t<command/>\n";
+printf "\t\t<services/>\n";
+printf "\t\t<rpms/>\n";
+printf "\t</capabilites>\n";
+
+# parse the XML input from the server
+my $xmlhnd = new XML::Parser(Handlers => { 
+				'Start' => \&client_handle_xml_begin , 
+				'End' => \&client_handle_xml_end , 
+				'Char' => \&client_handle_xml_char 
+				});
+
+my $res = $xmlhnd->parse(*STDIN, ErrorContext => 3);
+
+# create class CScan which perform file scanning on the file system
+my $Scan = Police::Scan::Dir->new(Log => $Log, ScanHook => \&PrintFileXML);
+
+foreach (@PATHS) {
+	$Scan->{Paths}->AddPath($_);
+}
+
+#############################################
+# scan
+#############################################
+if (defined($ACTIONS{'scan'})) {
+	print "\t<scan>\n";
+	$Scan->{Checksum} = $CHECKSUM;
+	$Scan->ScanDir("/");
+	print "\t</scan>\n";
+}
+
+#############################################
+# backup
+#############################################
+if (defined($ACTIONS{'backup'})) {
+	print "\t<backup>\n";
+	if (defined(@{$Scan->{BackupList}})) {
+		open FB, "| tar -c -z --no-recursion --numeric-owner -T- -f- | base64";
+		#open FB, "| cat";
+		foreach (@{$Scan->{BackupList}}) {
+			my $path =  "";
+			my (@patharr) = split('/', $_);
+			foreach my $part (@patharr) {
+				$path .= "/$part";
+				printf FB "%s\n", substr($path, 1);
+			}
+#			printf FB "%s\n", $_;
+		}
+		close FB;
+	}
+#	printf "%s\n", join("\n", @{$Scan->{BackupList}});
+	print "\t</backup>\n";
+}
+
+#############################################
+# rpm list 
+#############################################
+if (defined($ACTIONS{'rpms'})) {
+	print "\t<rpms>\n";
+	#open RPM, "rpm -qa|"; 
+	open RPM, "rpm -q -a --queryformat='%{N}-%{V}-%{R}.%{arch}\n'|"; 
+	while (<RPM>) {
+		chomp ;
+		printf "\t\t\t<rpm name=\"%s\"/>\n", $_;
+	}
+	close RPM;
+	print "\t</rpms>\n";
+}
+
+#############################################
+# chkconfig list 
+#############################################
+if (defined($ACTIONS{'services'})) {
+	print "\t<services>\n";
+	open CHKCONFIG, "chkconfig  --list | grep \"0:\"|"; 
+	while (<CHKCONFIG>) {
+		chomp ;
+		s/\d:off//g;
+		s/:on//g;
+		my ($service, @runlevels) = split(/\s+/);
+		printf "<service name=\"%s\" levels=\"%s\"/>\n", $service, join("", @runlevels);
+	}
+	close CHKCONFIG;
+	print "\t</services>\n";
+}
+
+#############################################
+# error processing
+#############################################
+if (@ERROR > 0) {
+	print "\t<errors>\n";
+	foreach (@ERROR) {
+		chomp;
+		printf "\t\t<error>%s</error>\n", $_ if ($_ ne "");
+	}
+	print "\t</errors>\n";
+}
+
+
+printf "</client>\n";
+

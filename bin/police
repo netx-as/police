@@ -1,0 +1,176 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings; 
+
+use lib '../lib';
+use lib 'lib';
+use Police::Edit; 
+use Police::Log; 
+use Police::Conf; 
+use Police::Scan::Dir; 
+use Police::Server;
+use File::Basename;
+use Getopt::Std;
+use Parallel::ForkManager;
+
+
+#use Getopt;
+#use Archive::Tar;
+
+my $VERSION	= "2.1.6a";
+my %OPTS;
+$OPTS{'d'} = 0;
+$OPTS{'q'} = 0;
+$OPTS{'c'} = "/police/config";
+my $PARALLEL = 0;
+
+sub usage() {
+	printf "Police server, usage: \n\n";
+	printf "     %s [ <options> ] <action> <system> <system> ... \n\n", basename($0);
+	printf "Oprions:\n";
+	printf "    -m        : send the result through an email instead of print to stdout \n";
+	printf "    -e        : send the empty reports \n";
+	printf "    -q        : quite mode, do not show the progress bar  \n";
+	printf "    -d <num>  : debug level, default value is 0  \n";
+	printf "    -c <dir>  : change the default base directory where configs are placed (default: %s)  \n", $OPTS{'c'};
+	printf "    -p <num>  : perform the paraell check operation, num identifies the number of process run in concurency. This option turns on the -q and -m option   \n\n";
+	printf "    -f <filter>  : filter for sync action. Filter can be specied as file pattern or package name. Regexp can be also used. \n\n";
+	printf "Actions:   \n";
+	printf "    diff      : print diff (the client and server action must be run before it)  \n";
+	printf "    check     : client + server + diff action blended into one command   \n";
+	printf "    download  : download differend files from the client side   \n";
+	printf "    config    : show options taken from the config file(s)   \n";
+	printf "    dumpdb    : dump diff database   \n";
+	printf "    ksinstall : prepare data for system kickstart installation   \n";
+	printf "    getlst    : create .xml list file based on the diff from the previous run  \n";
+	printf "    commit    : commit changes in te file system (creates YYYY-MM-DD.HH.MM.SS-commit.xml list file into %%{commitdir})   \n";
+	printf "    statistics : print statistics related to system   \n";
+	printf "    sync      : sync the client according to the server. Option -f can be used with this action  \n";
+	printf "    <system>  : the config name for the system (list), can by replaced by string all    \n\n";
+	printf "Version: %s\n", $VERSION;
+
+	exit 1;	
+}
+
+if ( !getopts("?emqd:c:p:f:",\%OPTS) || $OPTS{'?'}) {
+	printf "Unknown option\n";
+	usage;
+};
+
+# paralell run 
+my $pm;
+if ($OPTS{'p'} && $OPTS{'p'} > 0) {
+	$PARALLEL = $OPTS{'p'};
+	$pm = new Parallel::ForkManager($PARALLEL);	
+	$OPTS{'q'} = 1;		# quiet mode
+	$OPTS{'m'} = 1;		# mail mode
+}
+
+
+my $LOG =  Police::Log->new(ShowDebug => $OPTS{'d'}, ShowProgress => !$OPTS{'q'}, ErrStdOut => !$OPTS{'q'});
+my $EDIT =  Police::Edit->new();
+
+if (! -d $OPTS{'c'}) {
+	$LOG->Error("Can't change to directory  %s", $OPTS{'c'});
+	exit 1;
+}
+
+# process command and hosts lists 
+my $CMD = $ARGV[0]; shift;
+my %SYSTEMS;
+foreach (@ARGV) {
+	$SYSTEMS{$_} = 1;
+}
+
+# check if the command and list of hosts is set 
+if (!defined($CMD) || $CMD eq "" || !%SYSTEMS || keys(%SYSTEMS) == 0) {
+	usage();
+}
+
+
+my %SRV; 	# the hash where the server instances are stored 
+
+$LOG->ProgressInit("loading the configuration ##");
+
+foreach my $system (glob($OPTS{'c'}."/*")) {
+	next if ( ! -f  $system ); 
+	$system = basename($system);
+	next if ( ! defined($SYSTEMS{$system}) && !$SYSTEMS{'all'} );
+	$LOG->ProgressStep($system);
+	$LOG->Debug(10, "loading the configuration for %s", $system);
+	$SRV{$system} = Police::Server->new($system, CfgDir => $OPTS{'c'}, Log => $LOG, Edit => $EDIT, Filter => $OPTS{'f'} );
+	delete($SYSTEMS{$system});
+}
+$LOG->ProgressStep("done\n");
+
+foreach (keys %SYSTEMS) {
+	next if ($_ eq 'all');
+	$LOG->Error("Configuration file not foud for %s in dir %s", $_, $OPTS{'c'});
+}
+
+
+foreach my $system (sort keys %SRV) {
+	next if (!defined($SRV{$system}));
+
+	my $pid = $pm->start and next if ($PARALLEL); 
+
+	$LOG->Prefix($system.": ") if (scalar(keys(%SRV)) > 1) ;
+
+	if ($CMD eq "check") {
+		$SRV{$system}->Check();
+		$SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
+		$SRV{$system}->MkBkpDiffReport();
+		$SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
+	} elsif ($CMD eq "diff") {
+#		$SRV{$system}->MkDiff();
+		$SRV{$system}->MkBkpDiffReport();
+		$SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
+	} elsif ($CMD eq "backup") {
+	} elsif ($CMD eq "statistics") {
+		$SRV{$system}->Report("\nStatistics for %s:\n", $system);
+		$SRV{$system}->Report($SRV{$system}->StatPrint());
+		$SRV{$system}->SendReport();
+	} elsif ($CMD eq "download") {
+		$SRV{$system}->Download();
+	} elsif ($CMD eq "ksinstall") {
+		$SRV{$system}->PrepareInstall();
+	} elsif ($CMD eq "config") {
+		$SRV{$system}->GetConfig();
+	} elsif ($CMD eq "dumpdb") {
+		$SRV{$system}->DumpDb();
+	} elsif ($CMD eq "getlst") {
+		$SRV{$system}->GetLst();
+	} elsif ($CMD eq "commit") {
+		$SRV{$system}->Commit();
+	} elsif ($CMD eq "sync") {
+		$SRV{$system}->SyncClientPrepare();
+	} else {
+		$LOG->Error("Unknow command %s \n", $CMD);
+	}
+
+	$pm->finish if ($PARALLEL); 
+}
+
+$pm->wait_all_children if ($PARALLEL);
+
+
+# 2nd phase of "sync" command
+if ($CMD eq "sync") {
+	if (!$EDIT->EditList()) {
+		exit 0;
+	}
+
+	foreach my $system (sort keys %SRV) {
+		next if (!defined($SRV{$system}));
+		$LOG->Prefix($system.": ") if (scalar(keys(%SRV)) > 1) ;
+		$SRV{$system}->SyncClientPerform();
+	}
+
+}
+	
+
+
+exit 0;
+
+1;
