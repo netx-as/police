@@ -1174,7 +1174,7 @@ sub MkBkpDiffReport {
 		}
 
 		my %diff;
-		if ( defined(%{$self->{'DiffDb'}->{'/'.$file}}) ) {
+		if ( defined($self->{'DiffDb'}->{'/'.$file}) ) {
 			%diff = %{$self->{'DiffDb'}->{'/'.$file}};
 		} else {
 			$self->{Log}->Error("File found in the backup archive, but not found ind DiffDb (%s)", $file);

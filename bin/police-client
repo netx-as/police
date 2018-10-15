@@ -200,6 +200,7 @@ use File::Basename;
 use Fcntl ':mode';
 #use File::Glob ':glob';
 use File::Temp qw(tempfile);
+use Cwd;
 
 
 =head1 NAME
@@ -390,6 +391,8 @@ sub RecursiveScanDir {
         $dir =~ s/\/\//\//g;
     }
 
+	my $pwd = cwd();
+
 LOOP:
     foreach my $rfile (glob($dir)) {
 #		printf "XXX $rfile\n";
@@ -426,6 +429,8 @@ LOOP:
 #        $ref->{"packagename"}      = $package;
 #        $ref->{"packagetype"}      = "dir";
         $ref->{"mode"}             = $self->LsMode($inode[2]);
+
+		$ref->{"full_path"}			= sprintf("%s/%s", $pwd, $rfile);
 
         # check if file is symlink
         if (S_ISLNK($inode[2]) && defined($flags{'L'})) {
@@ -736,7 +741,7 @@ use strict;
 use warnings;
 use XML::Parser;
 
-my $VERSION		= "2011-05-19.001";
+my $VERSION		= "2018-10-15.002";
 my $PVERSION	= "0.3";		# protocol version 
 
 my @PATHS;
@@ -887,7 +892,7 @@ if (defined($ACTIONS{'scan'})) {
 #############################################
 if (defined($ACTIONS{'backup'})) {
 	print "\t<backup>\n";
-	if (defined(@{$Scan->{BackupList}})) {
+	if (@{$Scan->{BackupList}}) {
 		open FB, "| tar -c -z --no-recursion --numeric-owner -T- -f- | base64";
 		#open FB, "| cat";
 		foreach (@{$Scan->{BackupList}}) {
@@ -925,7 +930,7 @@ if (defined($ACTIONS{'rpms'})) {
 #############################################
 if (defined($ACTIONS{'services'})) {
 	print "\t<services>\n";
-	open CHKCONFIG, "chkconfig  --list | grep \"0:\"|"; 
+	open CHKCONFIG, "chkconfig  --list 2>/dev/null | grep \"0:\" |"; 
 	while (<CHKCONFIG>) {
 		chomp ;
 		s/\d:off//g;
@@ -934,6 +939,17 @@ if (defined($ACTIONS{'services'})) {
 		printf "<service name=\"%s\" levels=\"%s\"/>\n", $service, join("", @runlevels);
 	}
 	close CHKCONFIG;
+
+	if ( -x "/usr/bin/systemctl" ) {
+		open SYSTEMCTL, "/usr/bin/systemctl list-unit-files 2>/dev/null | grep enabled |";
+		while (<SYSTEMCTL>) {
+			if (/(.+)\..+\s+/) {
+				printf "<service name=\"%s\" levels=\"3\"/>\n", $1;
+			}
+		}
+	}
+
+
 	print "\t</services>\n";
 }
 

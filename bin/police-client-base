@@ -2,13 +2,9 @@
 
 use strict;
 use warnings;
-use lib '../lib';
-use Police::Scan::Dir;
-use Police::Log;
-use Police::Paths;
 use XML::Parser;
 
-my $VERSION		= "2011-05-19.001";
+my $VERSION		= "2018-10-15.002";
 my $PVERSION	= "0.3";		# protocol version 
 
 my @PATHS;
@@ -159,7 +155,7 @@ if (defined($ACTIONS{'scan'})) {
 #############################################
 if (defined($ACTIONS{'backup'})) {
 	print "\t<backup>\n";
-	if (defined(@{$Scan->{BackupList}})) {
+	if (@{$Scan->{BackupList}}) {
 		open FB, "| tar -c -z --no-recursion --numeric-owner -T- -f- | base64";
 		#open FB, "| cat";
 		foreach (@{$Scan->{BackupList}}) {
@@ -197,7 +193,7 @@ if (defined($ACTIONS{'rpms'})) {
 #############################################
 if (defined($ACTIONS{'services'})) {
 	print "\t<services>\n";
-	open CHKCONFIG, "chkconfig  --list | grep \"0:\"|"; 
+	open CHKCONFIG, "chkconfig  --list 2>/dev/null | grep \"0:\" |"; 
 	while (<CHKCONFIG>) {
 		chomp ;
 		s/\d:off//g;
@@ -206,6 +202,17 @@ if (defined($ACTIONS{'services'})) {
 		printf "<service name=\"%s\" levels=\"%s\"/>\n", $service, join("", @runlevels);
 	}
 	close CHKCONFIG;
+
+	if ( -x "/usr/bin/systemctl" ) {
+		open SYSTEMCTL, "/usr/bin/systemctl list-unit-files 2>/dev/null | grep enabled |";
+		while (<SYSTEMCTL>) {
+			if (/(.+)\..+\s+/) {
+				printf "<service name=\"%s\" levels=\"3\"/>\n", $1;
+			}
+		}
+	}
+
+
 	print "\t</services>\n";
 }
 
