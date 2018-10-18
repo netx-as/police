@@ -6,7 +6,8 @@
 
 int main(int argc, char ** argv)
 {
-    execv(REAL_PATH, argv);
+	char ** argve = NULL;
+    execv(REAL_PATH, argve);
     perror("Can't execue main script");
     return 126;
 }

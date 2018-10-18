@@ -156,6 +156,7 @@ if (defined($ACTIONS{'scan'})) {
 if (defined($ACTIONS{'backup'})) {
 	print "\t<backup>\n";
 	if (@{$Scan->{BackupList}}) {
+		$ENV{"PATH"} = "/usr/bin";
 		open FB, "| tar -c -z --no-recursion --numeric-owner -T- -f- | base64";
 		#open FB, "| cat";
 		foreach (@{$Scan->{BackupList}}) {

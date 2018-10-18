@@ -46,7 +46,7 @@ shoul be installed on both client and server.
 %install server
 make PREFIX=$RPM_BUILD_ROOT/ install-server
 
-%install server
+%install client
 make PREFIX=$RPM_BUILD_ROOT/ install-client
 
 %files  
@@ -59,6 +59,7 @@ make PREFIX=$RPM_BUILD_ROOT/ install-client
 
 %files client
 /usr/sbin/police-client
+/usr/sbin/police-client-bash
 
 
 %changelog

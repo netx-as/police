@@ -38,6 +38,7 @@ client:
 		cat lib/Police/Paths.pm | grep -v "use Police::" >> bin/police-client
 		cat bin/police-client-base | grep -v "use lib" | grep -v "use Police" >> bin/police-client
 		chmod +x bin/police-client
+		gcc -Wall -o bin/police-client-shell bin/police-client-shell.c
 
 install-server: libs
 		cd lib && make install && cd ..
@@ -45,6 +46,7 @@ install-server: libs
 
 install-client:  client
 		$(INSTALL) -o $(OWNER) -g $(GROUP) -m 755 bin/police-client $(BINDIR)
+		$(INSTALL) -o $(OWNER) -g $(GROUP) -m 755 bin/police-client-shell $(BINDIR)
 
 clean:
 		cd lib && make clean && rm -f Makefile && rm -f Makefile.old && cd ..
