@@ -223,6 +223,7 @@ sub ScanRpm($$$) {
 	}
 	$self->{Log}->Debug(10, ("Loading files for from %s for %s", $lastname, $rpmname ));
 	my $cmd = sprintf("rpm -q --nosignature --queryformat \"[%s\n]\" -p %s ", $tags, $lastname);
+	$self->{Log}->Debug(100, ("CMD: %s", $cmd ));
 
 	my $packagename = substr(basename($lastname), 0, rindex(basename($lastname), "."));
 	my $internalrpmname = undef;
@@ -234,7 +235,10 @@ sub ScanRpm($$$) {
 		my %attrs;
 
 		 # empty line 
-        next if (!defined($filename) || $filename eq '');
+        next if (!defined($filename) || $filename eq ''  || $filename eq '(none)');
+
+		$self->{Log}->Debug(100, ("PKG: %s, FILE: %s", $rpmname, $filename ));
+		
 
 		foreach my $x (0 .. @attarr - 1) {
 #           printf "%s -> %s \n", $rpmatt[$x],  $val[$x - 1];

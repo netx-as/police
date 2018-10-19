@@ -459,7 +459,7 @@ sub DbAddFile {
 		my $mtypeflags =  $FTYPEFMT{$mtype}->[0];			# flags to be check (depends on file type)
 
 		if (!defined($mtypeflags)) {
-			$self->{Log}->Error("Unknown outuput format (\$FTYPEFMT) for '%s' (file: %s)", $mtype, $file);
+			$self->{Log}->Error("Unknown outuput format (\$FTYPEFMT) for '%s' (file: %s, flgs: %s)", $mtype, $file, $mtypeflags);
 			print Dumper(\%diff);
 			return;
 		}
