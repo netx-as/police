@@ -665,6 +665,32 @@ sub ScanClient {
 
 	(tied(%{$self->{DiffDb}}))->CLEAR();		# clear database
 
+
+	if (!$self->BuildRequestFile()) {
+		$self->{Log}->Log("Can't build request fil for %s", $self->{HostId}); 
+		return 0;
+	}
+
+	# connect to the host and run command 
+	my $sstart = time();
+
+	my $ret = $self->RequestClient();
+
+	$self->{Log}->Log("Host %s scanned in %d secs", $self->{HostId}, time() - $sstart); 
+
+	$self->StatAdd('time_client');
+	return $ret;
+}
+
+=head2  BuildRequestFile
+
+Build request file 
+
+=cut
+
+sub BuildRequestFile {
+	my ($self) = @_;
+
 	my @request = ();
 	# prepare request for the client 
 	push(@request, "\t<paths>");
@@ -684,32 +710,13 @@ sub ScanClient {
 	push(@request, sprintf "\t\t<rpms/>\n") if ($self->{Config}->GetValBool("rpmdiff"));
 	push(@request, "\t</actions>");
 
-	# connect to the host and run command 
-	my $sstart = time();
-
-	my $ret = $self->RequestClient(@request);
-
-	$self->{Log}->Log("Host %s scanned in %d secs", $self->{HostId}, time() - $sstart); 
-
-	$self->StatAdd('time_client');
-	return $ret;
-}
-
-=head2  RequestClient
-
-Prepare basic XML request, send to the client and parse the output
-
-=cut
-
-sub RequestClient {
-	my ($self, @requestcmd) = @_;
 
 	# prepare request for the client 
 	my $reqfile = sprintf("%s/request.xml", $self->{WorkDir} );
 	open REQF, ">$reqfile";
 	printf REQF "\n";
 	printf REQF "<server>\n";
-	foreach (@requestcmd) {
+	foreach (@request) {
 		if (/^FILE: (.+)$/) {
 			open F1, "< $1";
 			my $buf;
@@ -724,7 +731,22 @@ sub RequestClient {
 	printf REQF "</server>\n";
 	close REQF;
 
+	return 1;
+}
+
+=head2  RequestClient
+
+Prepare basic XML request, send to the client and parse the output
+
+=cut
+
+sub RequestClient {
+	my ($self) = @_;
+
+
 	# repair XXX
+	my $reqfile = sprintf("%s/request.xml", $self->{WorkDir} );
+
 	my ($cmd) = $self->{Config}->GetVal("scancmd");
 	if (!defined($cmd) || $cmd eq "") {
 		$cmd = "police-client";

@@ -5,6 +5,7 @@ use warnings;
 
 use lib '../lib';
 use lib 'lib';
+use lib '/root/police/lib';
 use Police::Edit; 
 use Police::Log; 
 use Police::Conf; 
@@ -47,6 +48,7 @@ sub usage() {
 	printf "    commit    : commit changes in te file system (creates YYYY-MM-DD.HH.MM.SS-commit.xml list file into %%{commitdir})   \n";
 	printf "    statistics : print statistics related to system   \n";
 	printf "    sync      : sync the client according to the server. Option -f can be used with this action  \n";
+	printf "    request   : dispaly request for police-client \n";
 	printf "    <system>  : the config name for the system (list), can by replaced by string all    \n\n";
 	printf "Version: %s\n", $VERSION;
 
@@ -96,6 +98,12 @@ $LOG->ProgressInit("loading the configuration ##");
 foreach my $system (glob($OPTS{'c'}."/*")) {
 	next if ( ! -f  $system ); 
 	$system = basename($system);
+	if ($system =~ /^([\-\w\d\.]+)$/) {
+		$system = $1; 			# $data now untainted
+	} else {
+		$LOG->Error("Invalid characters in system file name %s.", $system);
+		next;
+	}
 	next if ( ! defined($SYSTEMS{$system}) && !$SYSTEMS{'all'} );
 	$LOG->ProgressStep($system);
 	$LOG->Debug(10, "loading the configuration for %s", $system);
@@ -111,12 +119,19 @@ foreach (keys %SYSTEMS) {
 
 
 foreach my $system (sort keys %SRV) {
+
+	if ($system =~ /^([\-\w\d\.]+)$/) {
+		$system = $1; 			# $data now untainted
+	} else {
+		$LOG->Error("Invalid characters in system name.");
+		next;
+	}
+
 	next if (!defined($SRV{$system}));
 
 	my $pid = $pm->start and next if ($PARALLEL); 
 
 	$LOG->Prefix($system.": ") if (scalar(keys(%SRV)) > 1) ;
-
 	if ($CMD eq "check") {
 		$SRV{$system}->Check();
 		$SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
@@ -145,6 +160,16 @@ foreach my $system (sort keys %SRV) {
 		$SRV{$system}->Commit();
 	} elsif ($CMD eq "sync") {
 		$SRV{$system}->SyncClientPrepare();
+	} elsif ($CMD eq "request") {
+		if (!$SRV{$system}->BuildRequestFile()) {
+    	    $LOG->Error("Can't build request fil for %s", $system);
+			return 0;
+		} else {
+			my $reqfile = sprintf("%s/request.xml", $SRV{$system}->{WorkDir} );	
+			open F1, "<$reqfile";
+			while (<F1>) { print $_; }
+			close F1;
+		}
 	} else {
 		$LOG->Error("Unknow command %s \n", $CMD);
 	}

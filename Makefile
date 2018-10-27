@@ -29,6 +29,9 @@ libs:
 		# build libs
 		cd lib && perl Makefile.PL && make
 
+server:
+		gcc -Wall -o bin/police-server-helper bin/police-server-helper.c
+
 client:
 		# create  the client executable by joining all libs into one file 
 		rm -f bin/police-client
