@@ -1557,7 +1557,7 @@ sub PrepareInstall {
 	open F1, "< $kst";
 	open F2, "> $ks";
 	while (<F1>) {
-		if (/(.*)%{(.*)}(.*)/) {
+		if (/(.*)%\{(.*)\}(.*)/) {
 			my ($pre, $key, $post) = ($1, $2, $3);
 			my @vals;
 			if ($2 eq "pkg:rpm") {

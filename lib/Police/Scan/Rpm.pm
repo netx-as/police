@@ -222,7 +222,7 @@ sub ScanRpm($$$) {
 		$tags .= sprintf("%%{%s}|", $_);
 	}
 	$self->{Log}->Debug(10, ("Loading files for from %s for %s", $lastname, $rpmname ));
-	my $cmd = sprintf("rpm -q --nosignature --queryformat \"[%s\n]\" -p %s ", $tags, $lastname);
+	my $cmd = sprintf("rpm -q --nosignature --queryformat \"%s\n\" -p %s ", $tags, $lastname);
 	$self->{Log}->Debug(100, ("CMD: %s", $cmd ));
 
 	my $packagename = substr(basename($lastname), 0, rindex(basename($lastname), "."));

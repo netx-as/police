@@ -107,12 +107,24 @@ Compare two RPM names an return result - election is based on the version number
 sub ScanLst($$$) {
 	my ($self, $lstname) = @_;
 
+	if ( ! -f $lstname ) {
+		$self->{Log}->Error("ERR the file %s for system %s not found", $lstname, $self->{Config}->{SysName});
+		return;
+	}
+
 	# parse the XML input from the client
 	my $xmlhnd = new XML::Parser(Handlers => {
 		'Start' => \&Police::Scan::Lst::HandleXmlBegin ,
 	});
 
-	my $res = $xmlhnd->parsefile($lstname, ErrorContext => 3, Self => $self );
+	eval {
+		my $res = $xmlhnd->parsefile($lstname, ErrorContext => 3, Self => $self );
+	};
+
+	if ( $@ ) {
+		$self->{Log}->Error("ERR can not parse %s for system %s", $lstname, $self->{Config}->{SysName});
+		return; 
+	}
 }
 
 =head2 GetFullPath

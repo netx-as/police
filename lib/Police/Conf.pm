@@ -90,7 +90,7 @@ sub ApplyMacro {
 	}
 
 	# parse the string and search for macros ( %{value} )
-	while ($str =~ /^(.*)\%{(.+)}(.*)$/) {
+	while ($str =~ /^(.*)\%\{(.+)\}(.*)$/) {
 		my ($p1, $p2, $p3) = ($1, $2, $3);
 		my ($newval) = $self->GetVal($p2);
 		$newval = "" if (!defined($newval));

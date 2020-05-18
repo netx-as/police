@@ -1,11 +1,12 @@
-#!/usr/bin/perl -w
+#!/usr/bin/perl
 
 use strict;
 use warnings; 
+use 5.010;
 
 use lib '../lib';
 use lib 'lib';
-use lib '/root/police/lib';
+use lib '/root/syspolice/lib';
 use Police::Edit; 
 use Police::Log; 
 use Police::Conf; 
@@ -13,18 +14,15 @@ use Police::Scan::Dir;
 use Police::Server;
 use File::Basename;
 use Getopt::Std;
-use Parallel::ForkManager;
+use Data::Dumper;
 
+my $VERSION	= "3.2.0";
+my %OPTS = (
+  'd' => '0',
+  'q' => '0',
+  'c' => '/police/config'
+);
 
-#use Getopt;
-#use Archive::Tar;
-
-my $VERSION	= "3.1.0";
-my %OPTS;
-$OPTS{'d'} = 0;
-$OPTS{'q'} = 0;
-$OPTS{'c'} = "/police/config";
-my $PARALLEL = 0;
 
 sub usage() {
 	printf "Police server, usage: \n\n";
@@ -55,147 +53,162 @@ sub usage() {
 	exit 1;	
 }
 
-if ( !getopts("?emqd:c:p:f:",\%OPTS) || $OPTS{'?'}) {
-	printf "Unknown option\n";
-	usage;
-};
+sub main($) {
+  my $PARALLEL = 1;
+  my $FORKS = 0;
 
-# paralell run 
-my $pm;
-if ($OPTS{'p'} && $OPTS{'p'} > 0) {
-	$PARALLEL = $OPTS{'p'};
-	$pm = new Parallel::ForkManager($PARALLEL);	
-	$OPTS{'q'} = 1;		# quiet mode
-	$OPTS{'m'} = 1;		# mail mode
+  if ( !getopts("?emqd:c:p:f:",\%OPTS) || $OPTS{'?'}) {
+  	printf "Unknown option\n";
+  	usage();
+  };
+
+  if ($OPTS{'p'} && $OPTS{'p'} > 0) {
+    $PARALLEL = $OPTS{'p'};
+    $OPTS{'q'} = 1;		# quiet mode
+    $OPTS{'m'} = 1;		# mail mode
+  }
+
+  my $LOG =  Police::Log->new(ShowDebug => $OPTS{'d'}, ShowProgress => !$OPTS{'q'}, ErrStdOut => !$OPTS{'q'});
+  my $EDIT = Police::Edit->new();
+  
+  if (! -d $OPTS{'c'}) {
+    $LOG->Error("Can't change to directory  %s", $OPTS{'c'});
+    exit 1;
+  }
+
+  my $CMD = shift @ARGV;
+  my %SYSTEMS = ();
+
+  foreach (@ARGV) {
+     $SYSTEMS{$_} = 1;
+  }
+
+  # check if the command and list of hosts is set 
+  if (!defined($CMD) || $CMD eq "" || !%SYSTEMS || keys(%SYSTEMS) == 0) {
+    usage();
+  }
+
+  my %SRV; # the hash where the server instances are stored 
+
+  $LOG->ProgressInit("loading the configuration ##");
+
+  foreach my $system (glob($OPTS{'c'}."/*")) {
+    next if ( ! -f  $system );
+    $system = basename($system);
+    if ($system =~ /^([\-\w\d\.]+)$/) {
+      $system = $1;       # $data now untainted
+    } else {
+      $LOG->Error("Invalid characters in system file name %s.", $system);
+      next;
+    }
+    next if ( ! defined($SYSTEMS{$system}) && !$SYSTEMS{'all'} );
+    $LOG->ProgressStep($system);
+    $LOG->Debug(10, "loading the configuration for %s", $system);
+    $SRV{$system} = Police::Server->new($system, CfgDir => $OPTS{'c'}, Log => $LOG, Edit => $EDIT, Filter => $OPTS{'f'} );
+    delete($SYSTEMS{$system});
+  }
+
+  $LOG->ProgressStep("done\n");
+
+  foreach (keys %SYSTEMS) {
+    next if ($_ eq 'all');
+    $LOG->Error("Configuration file not found for %s in dir %s", $_, $OPTS{'c'});
+  }
+
+  foreach my $system (sort keys %SRV) {
+    if ($system =~ /^([\-\w\d\.]+)$/) {
+      $system = $1;       # $data now untainted
+    } else {
+      $LOG->Error("Invalid characters in system name.");
+      next;
+    }
+
+    #print "$PARALLEL $FORKS $system\n";
+    #print Dumper %SRV;
+    next if (!defined($SRV{$system}));
+    
+    my $pid;
+
+    if ($PARALLEL) {
+      # wait for a free process
+      if ($FORKS >= $PARALLEL) {
+        $pid=wait();
+        $FORKS--;
+      }
+      $pid=fork();
+      next if (not defined $pid);
+      if ($pid) {
+        #parent
+        $FORKS++;
+      } else {
+        #child
+        print "child $CMD \n";
+        $LOG->Prefix($system.": ") if (scalar(keys(%SRV)) > 1) ;
+        if ($CMD eq "check") {
+          $SRV{$system}->Check();
+          $SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
+          $SRV{$system}->MkBkpDiffReport();
+          $SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
+        } elsif ($CMD eq "diff") {
+          #$SRV{$system}->MkDiff();
+          $SRV{$system}->MkBkpDiffReport();
+          $SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
+        } elsif ($CMD eq "backup") {
+        } elsif ($CMD eq "statistics") {
+          $SRV{$system}->Report("\nStatistics for %s:\n", $system);
+          $SRV{$system}->Report($SRV{$system}->StatPrint());
+          $SRV{$system}->SendReport();
+        } elsif ($CMD eq "download") {
+          $SRV{$system}->Download();
+        } elsif ($CMD eq "ksinstall") {
+          $SRV{$system}->PrepareInstall();
+        } elsif ($CMD eq "config") {
+          $SRV{$system}->GetConfig();
+        } elsif ($CMD eq "dumpdb") {
+          $SRV{$system}->DumpDb();
+        } elsif ($CMD eq "getlst") {
+          $SRV{$system}->GetLst();
+        } elsif ($CMD eq "commit") {
+          $SRV{$system}->Commit();
+        } elsif ($CMD eq "sync") {
+          $SRV{$system}->SyncClientPrepare();
+        } elsif ($CMD eq "request") {
+          if (!$SRV{$system}->BuildRequestFile()) {
+            $LOG->Error("Can't build request fil for %s", $system);
+            return 0;
+          } else {
+            my $reqfile = sprintf("%s/request.xml", $SRV{$system}->{WorkDir} );
+            open F1, "<$reqfile";
+            while (<F1>) { print $_; }
+            close F1;
+          }
+        } else {
+          $LOG->Error("Unknow command %s \n", $CMD);
+        }
+
+        exit;
+        # child end
+      }
+    }
+  }
+
+  #wait for other processess
+  for (1 .. $FORKS) {
+    my $pid=wait();
+  }
+
+  # 2nd phase of "sync" command
+  if ($CMD eq "sync") {
+    if (!$EDIT->EditList()) {
+      exit 0;
+    }
+
+    foreach my $system (sort keys %SRV) {
+      next if (!defined($SRV{$system}));
+      $LOG->Prefix($system.": ") if (scalar(keys(%SRV)) > 1) ;
+      $SRV{$system}->SyncClientPerform();
+    }
+  }
 }
 
-
-my $LOG =  Police::Log->new(ShowDebug => $OPTS{'d'}, ShowProgress => !$OPTS{'q'}, ErrStdOut => !$OPTS{'q'});
-my $EDIT =  Police::Edit->new();
-
-if (! -d $OPTS{'c'}) {
-	$LOG->Error("Can't change to directory  %s", $OPTS{'c'});
-	exit 1;
-}
-
-# process command and hosts lists 
-my $CMD = $ARGV[0]; shift;
-my %SYSTEMS;
-foreach (@ARGV) {
-	$SYSTEMS{$_} = 1;
-}
-
-# check if the command and list of hosts is set 
-if (!defined($CMD) || $CMD eq "" || !%SYSTEMS || keys(%SYSTEMS) == 0) {
-	usage();
-}
-
-
-my %SRV; 	# the hash where the server instances are stored 
-
-$LOG->ProgressInit("loading the configuration ##");
-
-foreach my $system (glob($OPTS{'c'}."/*")) {
-	next if ( ! -f  $system ); 
-	$system = basename($system);
-	if ($system =~ /^([\-\w\d\.]+)$/) {
-		$system = $1; 			# $data now untainted
-	} else {
-		$LOG->Error("Invalid characters in system file name %s.", $system);
-		next;
-	}
-	next if ( ! defined($SYSTEMS{$system}) && !$SYSTEMS{'all'} );
-	$LOG->ProgressStep($system);
-	$LOG->Debug(10, "loading the configuration for %s", $system);
-	$SRV{$system} = Police::Server->new($system, CfgDir => $OPTS{'c'}, Log => $LOG, Edit => $EDIT, Filter => $OPTS{'f'} );
-	delete($SYSTEMS{$system});
-}
-$LOG->ProgressStep("done\n");
-
-foreach (keys %SYSTEMS) {
-	next if ($_ eq 'all');
-	$LOG->Error("Configuration file not foud for %s in dir %s", $_, $OPTS{'c'});
-}
-
-
-foreach my $system (sort keys %SRV) {
-
-	if ($system =~ /^([\-\w\d\.]+)$/) {
-		$system = $1; 			# $data now untainted
-	} else {
-		$LOG->Error("Invalid characters in system name.");
-		next;
-	}
-
-	next if (!defined($SRV{$system}));
-
-	my $pid = $pm->start and next if ($PARALLEL); 
-
-	$LOG->Prefix($system.": ") if (scalar(keys(%SRV)) > 1) ;
-	if ($CMD eq "check") {
-		$SRV{$system}->Check();
-		$SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
-		$SRV{$system}->MkBkpDiffReport();
-		$SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
-	} elsif ($CMD eq "diff") {
-#		$SRV{$system}->MkDiff();
-		$SRV{$system}->MkBkpDiffReport();
-		$SRV{$system}->SendReport($OPTS{'m'}, $OPTS{'e'});
-	} elsif ($CMD eq "backup") {
-	} elsif ($CMD eq "statistics") {
-		$SRV{$system}->Report("\nStatistics for %s:\n", $system);
-		$SRV{$system}->Report($SRV{$system}->StatPrint());
-		$SRV{$system}->SendReport();
-	} elsif ($CMD eq "download") {
-		$SRV{$system}->Download();
-	} elsif ($CMD eq "ksinstall") {
-		$SRV{$system}->PrepareInstall();
-	} elsif ($CMD eq "config") {
-		$SRV{$system}->GetConfig();
-	} elsif ($CMD eq "dumpdb") {
-		$SRV{$system}->DumpDb();
-	} elsif ($CMD eq "getlst") {
-		$SRV{$system}->GetLst();
-	} elsif ($CMD eq "commit") {
-		$SRV{$system}->Commit();
-	} elsif ($CMD eq "sync") {
-		$SRV{$system}->SyncClientPrepare();
-	} elsif ($CMD eq "request") {
-		if (!$SRV{$system}->BuildRequestFile()) {
-    	    $LOG->Error("Can't build request fil for %s", $system);
-			return 0;
-		} else {
-			my $reqfile = sprintf("%s/request.xml", $SRV{$system}->{WorkDir} );	
-			open F1, "<$reqfile";
-			while (<F1>) { print $_; }
-			close F1;
-		}
-	} else {
-		$LOG->Error("Unknow command %s \n", $CMD);
-	}
-
-	$pm->finish if ($PARALLEL); 
-}
-
-$pm->wait_all_children if ($PARALLEL);
-
-
-# 2nd phase of "sync" command
-if ($CMD eq "sync") {
-	if (!$EDIT->EditList()) {
-		exit 0;
-	}
-
-	foreach my $system (sort keys %SRV) {
-		next if (!defined($SRV{$system}));
-		$LOG->Prefix($system.": ") if (scalar(keys(%SRV)) > 1) ;
-		$SRV{$system}->SyncClientPerform();
-	}
-
-}
-	
-
-
-exit 0;
-
-1;
+main(@ARGV);

@@ -45,7 +45,7 @@ client:
 
 install-server: libs
 		cd lib && make install && cd ..
-		$(INSTALL) -o $(OWNER) -g $(GROUP) -m 755 bin/police/client $(BINDIR)
+		$(INSTALL) -o $(OWNER) -g $(GROUP) -m 755 bin/police-client $(BINDIR)
 
 install-client:  client
 		$(INSTALL) -o $(OWNER) -g $(GROUP) -m 755 bin/police-client $(BINDIR)

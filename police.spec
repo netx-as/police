@@ -1,5 +1,5 @@
 %define name		police
-%define version		3.1.0
+%define version		3.2.0
 %define release		1
 
 Name:				%{name}
