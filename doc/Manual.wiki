@@ -200,7 +200,7 @@ Each option could be prefixed by + or - flag. Sign '+' enable the option and '-'
 
 || *option* || *meaning* ||
 || M || check mtime ||
-|| 5 || check file md5 sum ||
+|| 5 || check file md5/sha sum ||
 || S || check file size ||
 || H || check hard links number ||
 || L || check symlink path ||
@@ -208,6 +208,9 @@ Each option could be prefixed by + or - flag. Sign '+' enable the option and '-'
 || G || check group owner ||
 || D || check major and minor device number ||
 || B || do backup this file or directory ||
+|| F || do backup this file or directory but do not send diff report ||
+|| A || do autocommit for file or directory ||
+
 
 One directory can have multiple options. All this options are evaluated in defined order and last used value is applied.  
 
